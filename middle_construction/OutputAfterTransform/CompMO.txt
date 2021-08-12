@@ -1,0 +1,8 @@
+||(j:Q)Atomic_Begin
+v = ping
+Atomic_End
+;
+||(j:Q)Atomic_Begin
+x = pong
+assert(x=pong);
+Atomic_End

@@ -1,0 +1,9 @@
+||(j:Q)Loop_Begin(i:P)
+Atomic_Begin
+send(j,(i,ping));
+id,v<-receive(i)
+send(id,pong)
+x<-receive(j)
+assert(x=pong)
+Atomic_End
+Loop_End

@@ -1,0 +1,11 @@
+||(q:Q)Atomic_Begin
+send(P,q);
+id<-receive(q)
+send(id,ping)
+v<-receive(P);
+Atomic_End
+;
+||(q:Q)Atomic_Begin
+send(M,pong);
+w<-receive(q);
+Atomic_End

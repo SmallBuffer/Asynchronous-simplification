@@ -1,0 +1,5 @@
+||(q:Q)Atomic_Begin
+y = ping
+x = pong
+assert(x=pong);
+Atomic_End

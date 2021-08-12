@@ -1,0 +1,5 @@
+||(q:Q)Atomic_Begin
+id = j
+v = ack
+assert(v=ack);
+Atomic_End

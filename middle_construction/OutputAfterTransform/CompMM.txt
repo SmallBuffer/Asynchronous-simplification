@@ -1,0 +1,8 @@
+||(j:Q)Loop_Begin(i:P)
+Atomic_Begin
+id = i
+v = ping
+x = pong
+assert(x=pong)
+Atomic_End
+Loop_End

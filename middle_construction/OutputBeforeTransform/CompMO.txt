@@ -1,0 +1,9 @@
+||(j:Q)Atomic_Begin     
+send(j,ping);
+Atomic_End
+v<-receive();
+send(P,pong);
+||(j:Q)Atomic_Begin
+x<-receive(j);
+assert(x=pong);
+Atomic_End

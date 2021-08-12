@@ -1,0 +1,13 @@
+2
+P
+Q
+Loop_Begin(j:Q)
+send(j,(i,ping));
+x<-receive(j)
+assert(x=pong)
+Loop_End
+||
+Loop_Begin(i:P)
+id,v<-receive(i)
+send(id,pong)
+Loop_End
