@@ -20,15 +20,13 @@ struct Mes{
 };
 int Init()
 {
-    //创建套接字
   int serv_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-  //将套接字和IP、端口绑定
   struct sockaddr_in serv_addr;
-  memset(&serv_addr, 0, sizeof(serv_addr)); //每个字节都用0填充
-  serv_addr.sin_family = AF_INET;           //使用IPv4地址
-  serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); //具体的IP地址
-  serv_addr.sin_port = htons(1234);                   //端口
+  memset(&serv_addr, 0, sizeof(serv_addr)); 
+  serv_addr.sin_family = AF_INET;           
+  serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
+  serv_addr.sin_port = htons(1234);                   
   bind(serv_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
 
   return serv_sock;
@@ -45,11 +43,10 @@ void Connect_Clients(int serv_sock)
 }
 int main() {
   int serv_sock=Init();
-  //进入监听状态，等待用户发起请求
+
   listen(serv_sock, 20);
   Connect_Clients(serv_sock);
 
-  //向客户端发送数据
   for(int r=0;r<round;++r)
   {
     for (int i = 0; i < wait_queue.size();++i)
@@ -63,8 +60,6 @@ int main() {
     }
   }
  
-
-  //关闭套接字
   for(auto clnt_sock:wait_queue)
   close(clnt_sock);
   close(serv_sock);
