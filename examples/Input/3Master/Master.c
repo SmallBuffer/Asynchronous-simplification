@@ -51,3 +51,9 @@ int main() {
 
   return 0;
 }
+
+/*
+1 => pong
+2 => ping
+3 => ack
+*/
