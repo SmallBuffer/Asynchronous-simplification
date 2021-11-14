@@ -1,8 +1,0 @@
-Loop_Begin(r:R)
-||(j:Q)Atomic_Begin
-rid = r
-v[rid] = ping
-x = pong
-assert(x=pong)
-Atomic_End
-Loop_End

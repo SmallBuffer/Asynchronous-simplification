@@ -1,9 +1,0 @@
-||(q:Q){
-send(P,j)
-Atomic_Begin
-id<-receive(q);
-send(id,ack);
-Atomic_End
-v<-receive(P);
-assert(v=ack);
-}

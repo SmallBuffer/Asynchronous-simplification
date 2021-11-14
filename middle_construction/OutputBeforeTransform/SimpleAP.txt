@@ -1,7 +1,0 @@
-||(q:Q)Atomic_Begin
-send(q,ping);
-y<-receive(P);
-send(P,pong);
-x<-receive(q);
-assert(x=pong);
-Atomic_End

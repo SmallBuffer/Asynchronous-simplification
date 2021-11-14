@@ -1,8 +1,0 @@
-||(q:Q)Atomic_Begin
-id = q
-v = ping
-Atomic_End
-;
-||(q:Q)Atomic_Begin
-w = pong
-Atomic_End

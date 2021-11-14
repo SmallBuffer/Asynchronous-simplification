@@ -1,9 +1,0 @@
-Loop_Begin(r:R)
-||(j:Q)Atomic_Begin
-send(j,(r,ping)）
-rid,v[rid]<-receive(P)
-send(P,pong)
-x<-receive(j,r)
-assert(x=pong)
-Atomic_End
-Loop_End
