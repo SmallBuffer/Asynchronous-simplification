@@ -35,7 +35,7 @@ After the build is complete, you can find the executable ASYSIM in the generated
 
 ### **Run the ASYSIM tool**
 ```javascript
-./ASYSIM /path/to/Server.cpp /path/to/Client.cpp --
+./ASYSIM /path/to/example.cpp --
 ```
 The tool will output the conversion result (result.cpp) in the current directory by default, and you can also specify the output path through the "-p" parameter:</br>
 ```javascript
