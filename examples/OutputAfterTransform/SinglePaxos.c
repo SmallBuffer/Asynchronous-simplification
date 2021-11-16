@@ -34,6 +34,7 @@ void* Thread_1( )
 	while(true)
 	{
 		P1.N = time(0)%10000;
+		P1.value = 1;
 		while (true)
 		{   
 
@@ -138,6 +139,7 @@ void* Thread_1( )
 	while(true)
 	{
 		P2.N = time(0)%10000;
+		P2.value = 2;
 		while (true)
 		{   
 
@@ -241,6 +243,7 @@ void* Thread_2( )
 	while(true)
 	{
 		P1.N = time(0)%10000;
+		P1.value = 1;
 		while (true)
 		{   
 
@@ -344,6 +347,7 @@ void* Thread_2( )
 	while(true)
 	{
 		P2.N = time(0)%10000;
+		P2.value = 2;
 		while (true)
 		{   
 
