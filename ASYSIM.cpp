@@ -202,35 +202,6 @@ class RelateForPrinter : public MatchFinder::MatchCallback {
 
 		}
 };
-/*
-   class RelateIfPrinter : public MatchFinder::MatchCallback {
-   public:
-   virtual void run(const MatchFinder::MatchResult &Result) {
-   ASTContext *Context = Result.Context;
-   const IfStmt *RelateIf =
-   Result.Nodes.getNodeAs<clang::IfStmt>("relateIfStmt");
-   if (!RelateIf || !Context->getSourceManager().isWrittenInMainFile(
-   RelateIf->getIfLoc()))
-   return;
-   FullSourceLoc FullLocation_begin =
-   Context->getFullLoc(RelateIf->getBeginLoc());
-   FullSourceLoc FullLocation_end =
-   Context->getFullLoc(RelateIf->getEndLoc());
-   int col_begin = FullLocation_begin.getSpellingLineNumber();
-   int col_end = FullLocation_end.getSpellingLineNumber();
-   for (int i = col_begin; i <= col_end; i++) {
-   if (mark[i]) {
-   for (int j = col_begin; j <= col_end; j++)
-   {
-   if(mark[j]==0)
-   mark[j] = 1;
-   }
-   break;
-   }
-   }
-   }
-   };
-   */
 class VarDeclPrinter : public MatchFinder::MatchCallback {
 	public:
 		virtual void run(const MatchFinder::MatchResult &Result) {
