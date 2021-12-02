@@ -25,7 +25,7 @@ void Recv(std::queue<int>* addr,int* res )
 	*res = addr->front();
 	addr->pop();
 }
-void* Client_Thread(void * par )
+void* Client_Thread(void * par ) // participator-client
 {
 	int i =*((int *)par);
 	int message_recv;
@@ -33,13 +33,14 @@ void* Client_Thread(void * par )
 	Send(&server_buffer,2); //send to server
 	return 0;
 }
-void* Server_Thread(void * par){
+void* Server_Thread(void * par) // participator-server
+{
 	int message_recv;
-	for (int i = 0; i < client_num;++i)
+	for (int i = 0; i < client_num;++i) // Iterate over multiple-client
 	{
 		Send(&client_buffer[i], 1);
 	}
-	for (int i = 0; i < client_num;++i)
+	for (int i = 0; i < client_num;++i) // Iterate over multiple-client
 	{
 		Recv(&server_buffer, &message_recv);
 		assert(message_recv= 2);

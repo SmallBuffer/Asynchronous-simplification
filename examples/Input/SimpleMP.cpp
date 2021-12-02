@@ -17,23 +17,30 @@
 
 std::queue<int> server_buffer,client_buffer[client_num];
 
-void Send(std::queue<int>* addr,int x)
-{
+void Send(std::queue<int>* addr,int x){
 	addr->push(x);
 }
-void Recv(std::queue<int>* addr,int* res )
-{
+void Recv(std::queue<int>* addr,int* res ){
 	while(addr->empty());	//缓存区为空时读取阻塞
 	*res = addr->front();
 	addr->pop();
 }
 
+void * Server_Thread(void *par ){ // participator-server
+	// to-client
+	int id;
+	for (int i = 0; i < client_num;++i){ // Iterate over multiple-client
+		Recv(&server_buffer, &id);
+		Send(&client_buffer[id], 1);
+	}
+	return 0;
+}
 
-void * Client_Thread(void *par) // participator-client
-{
+void * Client_Thread(void *par){ // participator-client
 	// to-server
 	int ack;
-	int id = *((int *)par);
+	int id;
+	id = *((int *)par);
 	Send(&server_buffer,id);
 	Recv(&client_buffer[id], &ack);
 	assert(ack==1);
@@ -41,19 +48,7 @@ void * Client_Thread(void *par) // participator-client
 	return 0;
 }
 
-void * Server_Thread(void *par ) // participator-server
-{
-	// to-client
-	int id;
-	for (int i = 0; i < client_num;++i) // Iterate over multiple-client
-	{
-		Recv(&server_buffer, &id);
-		Send(&client_buffer[id], 1);
-	}
-	return 0;
-}
-int main()
-{
+int main(){
 	//start thread
 	for(int i=0;i<server_num;++i){
 		pthread_t id;
@@ -63,8 +58,7 @@ int main()
 		pthread_join(id,NULL);
 	}
 
-	for( int i=0 ; i < client_num ; ++i)
-	{
+	for( int i=0 ; i < client_num ; ++i){
 
 		pthread_t id;
 		int ret = 0;

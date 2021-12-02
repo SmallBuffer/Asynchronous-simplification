@@ -47,7 +47,7 @@ void Recv(std::queue<int>* addr,void * res ,int len)
 	}
 }
 
-void * Client_Thread(void *par)
+void * Client_Thread(void *par) // participator-client
 {
 	struct Mes mess_recv;
 	int id_p,id_q,val,client_msg,decision,value;
@@ -73,17 +73,18 @@ void * Client_Thread(void *par)
 	return 0;
 }
 
-void * Server_Thread(void * par) {
+void * Server_Thread(void * par)  // participator-server
+{
 
 	struct Mes mess_send;
 	int prop,server_msg,is_aborted,reply,committed,ack;
-	for (int i = 0; i < client_num; ++i)
+	for (int i = 0; i < client_num; ++i) // Iterate over multiple-client
 	{
 		mess_send.c = i;
 		mess_send.message=prop;
 		Send(&client_buffer[i],&mess_send,sizeof(struct Mes));
 	}
-	for (int i = 0; i < client_num;++i)
+	for (int i = 0; i < client_num;++i) // Iterate over multiple-client
 	{
 		Recv(&server_buffer,&server_msg,sizeof(int));
 		if(server_msg == 0){
@@ -98,11 +99,11 @@ void * Server_Thread(void * par) {
 	else{
 		reply = 0;
 	}
-	for (int i = 0; i < client_num;++i)
+	for (int i = 0; i < client_num;++i) // Iterate over multiple-client
 	{
 		Send(&client_buffer[i],&reply,sizeof(int));
 	}
-	for (int i = 0; i < client_num; ++i)
+	for (int i = 0; i < client_num; ++i) // Iterate over multiple-client
 	{
 		Recv(&server_buffer,&ack,sizeof(int));
 		assert(ack == 1);
