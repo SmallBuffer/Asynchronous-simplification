@@ -1,4 +1,4 @@
-#pragma GCC optimize(2)
+#include<bits/stdc++.h>
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -16,10 +16,18 @@
 #include <stdbool.h>
 #include <string>
 #include <vector>
-#include<set>
+#include <utility>
+#include <set>
 #include <fstream>
 
-// std::vector<std::pair<int, string>> media_file;
+//DEBUG
+// #define DEBUG
+// #ifdef DEBUG
+// #define debug(...) printf(_VA_ARGS_)
+// #else
+// #define debug(...)
+// #endif
+
 using namespace clang::tooling;
 using namespace llvm;
 
@@ -37,1095 +45,844 @@ using namespace clang;
 using namespace clang::ast_matchers;
 using namespace std;
 
-struct node {
-  string content;
-  int begincnt;
-  vector<string> endcontent;
-  int nex;
-  int to;
-  node(string a, int b = 0, vector<string> d = vector<string>(0), int c = -1,
-       int f = -1)
-      : content(a), begincnt(b), endcontent(d), nex(c), to(f) {}
-  bool contain(string a) { return content.find(a, 0) != content.npos; }
-  vector<string> getparam() {
-    vector<string> ans;
-    if (this->contain("send(")) {
-      int temid = content.find(",", 0);
-      if (content.find("(", temid + 1) != content.npos)
-      //如果带括号有多个参数
-      {
-        int temid2 = content.find("(", temid + 1); //"("的下标
-        string param = content.substr(
-            temid2 + 1, content.find(")", temid2 + 1) - temid2 - 1);
-        while (param.find(",", 0) != param.npos) {
-          int temid3 = param.find(",", 0);
-          ans.push_back(param.substr(0, temid3));
-          param = param.substr(temid3 + 1, param.length() - temid3 - 1);
-        }
-        ans.push_back(param);
-      } else {
-        int temid2 = content.find(")", temid + 1);
-        ans.push_back(content.substr(temid + 1, temid2 - temid - 1));
-      }
-    } else if (this->contain("<-receive(")) {
-      int temid = content.find("<-", 0);
-      string param = content.substr(0, temid);
-      if (param.find(",", 0) != param.npos) //有多个逗号分隔的参数
-      {
-        while (param.find(",", 0) != param.npos) {
-          int temid3 = param.find(",", 0);
-          ans.push_back(param.substr(0, temid3));
-          param = param.substr(temid3 + 1, param.length() - temid3 - 1);
-        }
-        ans.push_back(param);
-      } else
-        ans.push_back(param);
-    }
-    return ans;
-  }
+int depth = 0; //循环层数
+int participate_num = 0; //对象类型数量
+int main_function_begin = 0;
+
+string tag1="// participator-";
+string tag2="// Iterate over multiple-"; 
+string tag3="// Repeat Round";  
+string tag4="// id-";
+
+vector<pair<int,int> >func_bound; //对象线程函数的行号范围
+vector<string> file_name;    //待处理的文件名
+vector<string> par_name;    //参与者名
+vector<string> source_file; //输入源代码
+vector<vector<string>> cutted_file; //裁剪结果
+map<string, int> parname_to_id;
+vector<set<string> >ref_list;
+set<string> var_name;
+map<string, vector<int> > var_occur_col,var_decl_col;
+map<string, string> F;
+map<string, bool> remain_var;
+set<string> unuse_var;
+unordered_map<int, int> mark;
+
+//用结点结构体表示中间结构中的每一句语句，最后的结构用节点链表串联实现
+
+struct node
+{
+	int loop_depth;
+	string tex;
+	node * nex;
+	node * pre;
+	node(int depth,string contant):loop_depth(depth),tex(contant),nex(NULL),pre(NULL){}
+	bool contain(string x);
 };
-int mark[10000];
-string path_file; //结果输出路径
-vector<string> source_file, intermediate_structure;
-vector<node> P;           //存储所有参与者的语料
-vector<int> start_index;  //每个参与者语料的起始下标
-vector<int> par_position; //每个参与者语料当前读取到的下标
-vector<bool> ismulti;     //标识每个参与者是否有多个
-vector<string> par_name;  //参与者名
-int stid = -1;
-bool iserror = false; //标识语料输入是否有错误
-string lasstore = ""; //存储上一次receive内容的变量
-stack<string> Loopstmt;
-map<string, int> mp;     //迭代变量和迭代集合编号映射
-map<string, int> struct_id;  //变量所属结构体编号
-map<string, string> trans_var;
-int participate_num = 0; //参与者数量
-vector<string> result, transf_intermediate;
-stack<int> emptyid;
-map<int, int> dep;
-int mxde = 0;
-bool is_in_Loop = 0;
-bool is_roundN = 0;
-vector<string> lasrecv;
-vector<string> head_declare,thread,main_function;
-set<string> var_name,include_header, name_space_declare;
-stack<int> lasbegincnt;
-int firstSenderId;
+vector<node *> cur_node_id;
+vector<int> sendrecv_col;
+vector<int> participate_col;
 
-const int maxn = 1e5;
 
-bool compa(string A, string B);
-void link(int parid);
-void transformToAssignment(int stid);
-int findTheFirstSender();
-void output();
-void solve();
 string trim(string x);
-string getVarName(string temp);
-string changeVar(string it);
-string getParam(int col, int para_id) {
-  string temp = source_file[col - 1];
-  int id1 = temp.find('(', 0);
-  int id2 = temp.find(',', 0);
-  int id3 = temp.find(',', id2 + 1);
-  if (para_id == 0) {
-    temp = temp.substr(id1 + 1, id2 - id1 - 1);
-  } else if (para_id == 1) {
-    temp = temp.substr(id2 + 1, id3 - id2 - 1);
-  }
-  if (temp.find('[', 0) != temp.npos)
-    temp = temp.substr(0, temp.find('[', 0));
-  if(temp.find('(',0)!=temp.npos&&temp.find(')',0)!=temp.npos)
-  {
-    int k1 = temp.find('(', 0);
-    int k2 = temp.find(')', 0);
-    temp = temp.substr(0,k1)+temp.substr(k2 + 1, temp.length() - k2 - 1);
-  }
-  if(temp.find('*',0)!=temp.npos)
-  {
-    int k = temp.find('*');
-    temp = temp.substr(0,k)+temp.substr(k + 1, temp.length() - k - 1);
-  }
-  if(temp.find('&')!=temp.npos)
-  {
-    int k = temp.find('&');
-    temp = temp.substr(0,k)+temp.substr(k + 1, temp.length() - k - 1);
-  }
-  int i = 0, j = temp.length() - 1;
-  while (temp[i] == ' ' && i <= j)
-    i++;
-  while (temp[j] == ' ' && i <= j)
-    j--;
-  return temp.substr(i, j - i + 1);
-}
-// Declares clang::SyntaxOnlyAction.
-string Name = "bufRecv";
+string GetF(string x);
+void Init();
+void Link(string a,string b );
+//简化send和recv
+void SimSendRecv();
+void Cut(ClangTool Tool);
+
+string toUpperCase(string s);
+string toLowerCase(string s);
+
+//生成各参与者的节点序列
+void GenerateNodeList(int participate_num);
+int GetDestination(node * x);
+//串联合并节点序列成一个节点链表
+node * LinkNode(int participate_num);
+
+//定义抽象语法树匹配器
 StatementMatcher SendMatcher =
-    callExpr(callee(functionDecl(hasName("write")))).bind("sendStmt");
+callExpr(callee(functionDecl(hasName("Send")))).bind("sendStmt");
 StatementMatcher RecvMatcher =
-    callExpr(callee(functionDecl(hasName("read")))).bind("recvStmt");
+callExpr(callee(functionDecl(hasName("Recv")))).bind("recvStmt");
 StatementMatcher RelateForMatcher = forStmt().bind("relateForStmt");
 StatementMatcher RelateIfMatcher = ifStmt().bind("relateIfStmt");
+DeclarationMatcher VarDeclMatcher =namedDecl(anyOf(functionDecl(isDefinition()), fieldDecl(),varDecl(isDefinition()), enumConstantDecl(),labelDecl(), typedefDecl(),enumDecl(isDefinition()),recordDecl(isDefinition()))).bind("varDecl");
+
+DeclarationMatcher FuncDeclMatcher = functionDecl(isDefinition()).bind("func");
+
 class SendPrinter : public MatchFinder::MatchCallback {
-public:
-  virtual void run(const MatchFinder::MatchResult &Result) {
-    ASTContext *Context = Result.Context;
-    const CallExpr *Send = Result.Nodes.getNodeAs<clang::CallExpr>("sendStmt");
-    // const Expr *Arg_0 = Send->getArg(0);
-    FullSourceLoc FullLocation = Context->getFullLoc(Send->getBeginLoc());
-    int col = FullLocation.getSpellingLineNumber();
-    mark[col] = 3;
-    string tempname = trim(getParam(col, 1));
-    var_name.insert(getVarName(tempname));
-  }
+	public:
+		virtual void run(const MatchFinder::MatchResult &Result) {
+			ASTContext *Context = Result.Context;
+			const CallExpr *Send = Result.Nodes.getNodeAs<clang::CallExpr>("sendStmt");
+			// const Expr *Arg_0 = Send->getArg(0);
+			FullSourceLoc FullLocation = Context->getFullLoc(Send->getBeginLoc());
+			int col = FullLocation.getSpellingLineNumber();
+			mark[col] = 1;
+			sendrecv_col.push_back(col);
+		}
 };
 class RecvPrinter : public MatchFinder::MatchCallback {
-public:
-  virtual void run(const MatchFinder::MatchResult &Result) {
-    ASTContext *Context = Result.Context;
-    const CallExpr *Recv = Result.Nodes.getNodeAs<clang::CallExpr>("recvStmt");
-    // const Expr *Arg_0 = Recv->getArg(0);
-    // const Expr *Arg_1 = Recv->getArg(1);
-    FullSourceLoc FullLocation = Context->getFullLoc(Recv->getBeginLoc());
-    int col = FullLocation.getSpellingLineNumber();
-    mark[col] = 4;
-    string tempname = trim(getParam(col, 1));
-    var_name.insert(getVarName(tempname));
-  }
+	public:
+		virtual void run(const MatchFinder::MatchResult &Result) {
+			ASTContext *Context = Result.Context;
+			const CallExpr *Recv = Result.Nodes.getNodeAs<clang::CallExpr>("recvStmt");
+			// const Expr *Arg_0 = Recv->getArg(0);
+			// const Expr *Arg_1 = Recv->getArg(1);
+			FullSourceLoc FullLocation = Context->getFullLoc(Recv->getBeginLoc());
+			int col = FullLocation.getSpellingLineNumber();
+			mark[col] = 10;
+			sendrecv_col.push_back(col);
+		}
 };
 class RelateForPrinter : public MatchFinder::MatchCallback {
-public:
-  virtual void run(const MatchFinder::MatchResult &Result) {
-    ASTContext *Context = Result.Context;
-    const ForStmt *RelateFor =
-        Result.Nodes.getNodeAs<clang::ForStmt>("relateForStmt");
-    if (!RelateFor || !Context->getSourceManager().isWrittenInMainFile(
-                          RelateFor->getForLoc()))
-      return;
-    FullSourceLoc FullLocation_begin =
-        Context->getFullLoc(RelateFor->getBeginLoc());
-    FullSourceLoc FullLocation_end =
-        Context->getFullLoc(RelateFor->getEndLoc());
-    int col_begin = FullLocation_begin.getSpellingLineNumber();
-    int col_end = FullLocation_end.getSpellingLineNumber();
+	public:
+		virtual void run(const MatchFinder::MatchResult &Result) {
+			ASTContext *Context = Result.Context;
+			const ForStmt *RelateFor =
+				Result.Nodes.getNodeAs<clang::ForStmt>("relateForStmt");
+			if (!RelateFor || !Context->getSourceManager().isWrittenInMainFile(
+						RelateFor->getForLoc()))
+				return;
+			FullSourceLoc FullLocation_begin =
+				Context->getFullLoc(RelateFor->getBeginLoc());
+			FullSourceLoc FullLocation_end =
+				Context->getFullLoc(RelateFor->getEndLoc());
+			int col_begin = FullLocation_begin.getSpellingLineNumber();
+			int col_end = FullLocation_end.getSpellingLineNumber();
 
-    if(source_file[col_begin-1].find("round",0)!=source_file[col_begin-1].npos)
-    {
-      if(is_roundN)return;
-      is_roundN = 1;
-    }
-    for (int i = col_begin; i <= col_end; i++) {
-      
-      if (mark[i]) {
-        mark[col_begin] = 2;
-        mark[col_end] = 5;
-        break;
-      }
-    }
-  }
+			for (int i = col_begin; i <= col_end; i++) {
+
+				if (mark[i]) {
+					break;
+				}
+				if(i == col_end) return; //说明不是关键语句，故不做处理
+			}
+			//接下来进行简化循环
+
+			if(source_file[col_begin-1].find(tag2)!= source_file[col_begin-1].npos)
+			{
+				string temp = source_file[col_begin-1];
+
+				int id = temp.find(tag2);
+				string name = temp.substr(id+tag2.length(),temp.length()-id-tag2.length());
+
+				source_file[col_begin-1] = "Loop_Begin("+name+")";
+				source_file[col_end-1] = "Loop_End("+name+")";
+				mark[col_begin] = 3;
+				mark[col_end] = 3;
+			}
+			//else if(source_file[col_begin].find(tag3)!= temp.npos)
+			//{
+
+			//}
+			else
+			{
+				//没有任何标记则为普通循环，只保留循环头尾
+				const Stmt *ForBody = RelateFor->getBody();
+				FullLocation_begin =
+					Context->getFullLoc(ForBody->getBeginLoc());
+				FullLocation_end =
+					Context->getFullLoc(ForBody->getEndLoc());
+				int body_begin = FullLocation_begin.getSpellingLineNumber();
+				int body_end = FullLocation_end.getSpellingLineNumber();
+
+				for(int i = col_begin; i<body_begin;++i){
+					mark[i]=3;
+
+				}
+				for(int i = body_end+1; i<=col_end;++i){
+					mark[i]=3;
+				}
+
+			}
+
+
+		}
 };
-class RelateIfPrinter : public MatchFinder::MatchCallback {
-public:
-  virtual void run(const MatchFinder::MatchResult &Result) {
-    ASTContext *Context = Result.Context;
-    const IfStmt *RelateIf =
-        Result.Nodes.getNodeAs<clang::IfStmt>("relateIfStmt");
-    if (!RelateIf || !Context->getSourceManager().isWrittenInMainFile(
-                          RelateIf->getIfLoc()))
-      return;
-    FullSourceLoc FullLocation_begin =
-        Context->getFullLoc(RelateIf->getBeginLoc());
-    FullSourceLoc FullLocation_end =
-        Context->getFullLoc(RelateIf->getEndLoc());
-    int col_begin = FullLocation_begin.getSpellingLineNumber();
-    int col_end = FullLocation_end.getSpellingLineNumber();
-    for (int i = col_begin; i <= col_end; i++) {
-      if (mark[i]) {
-        for (int j = col_begin; j <= col_end; j++)
-        {
-          if(mark[j]==0)
-            mark[j] = 1;
-        }
-        break;
-      }
-    }
-  }
+/*
+   class RelateIfPrinter : public MatchFinder::MatchCallback {
+   public:
+   virtual void run(const MatchFinder::MatchResult &Result) {
+   ASTContext *Context = Result.Context;
+   const IfStmt *RelateIf =
+   Result.Nodes.getNodeAs<clang::IfStmt>("relateIfStmt");
+   if (!RelateIf || !Context->getSourceManager().isWrittenInMainFile(
+   RelateIf->getIfLoc()))
+   return;
+   FullSourceLoc FullLocation_begin =
+   Context->getFullLoc(RelateIf->getBeginLoc());
+   FullSourceLoc FullLocation_end =
+   Context->getFullLoc(RelateIf->getEndLoc());
+   int col_begin = FullLocation_begin.getSpellingLineNumber();
+   int col_end = FullLocation_end.getSpellingLineNumber();
+   for (int i = col_begin; i <= col_end; i++) {
+   if (mark[i]) {
+   for (int j = col_begin; j <= col_end; j++)
+   {
+   if(mark[j]==0)
+   mark[j] = 1;
+   }
+   break;
+   }
+   }
+   }
+   };
+   */
+class VarDeclPrinter : public MatchFinder::MatchCallback {
+	public:
+		virtual void run(const MatchFinder::MatchResult &Result) {
+			ASTContext *Context = Result.Context;
+			const NamedDecl *VarDecl =
+				Result.Nodes.getNodeAs<clang::VarDecl>("varDecl");
+
+
+			if (!VarDecl || !Context->getSourceManager().isWrittenInMainFile(
+						VarDecl->getBeginLoc()))
+				return;
+
+			FullSourceLoc FullLocation =
+				Context->getFullLoc(VarDecl->getBeginLoc());
+			int col = FullLocation.getSpellingLineNumber();
+			//只考虑主函数外
+			if(col>=func_bound[0].first&&col<=func_bound[0].second)return;
+			// if(col <= main_function_begin)
+			// 	return;
+			SourceLocation SL = VarDecl->getLocation();
+			std::string Name = VarDecl->getNameAsString ();
+			if(Name == "")
+				return;
+			for(auto it:unuse_var)
+			{
+				if(it == Name)
+					return;
+			}
+			var_name.insert(Name);
+			var_occur_col[Name].push_back(col);
+			var_decl_col[Name].push_back(col);
+		}
 };
-class RelateVarDeclPrinter : public MatchFinder::MatchCallback {
-public:
-  virtual void run(const MatchFinder::MatchResult &Result) {
-    ASTContext *Context = Result.Context;
-    const DeclRefExpr *RelateVarDecl =
-        Result.Nodes.getNodeAs<clang::DeclRefExpr>("varDeclRef");
-    const VarDecl *RelateVar =
-        Result.Nodes.getNodeAs<clang::VarDecl>("relateVar");
-    if (!RelateVarDecl || !Context->getSourceManager().isWrittenInMainFile(
-                              RelateVarDecl->getBeginLoc()))
-      return;
-    if (!RelateVar || !Context->getSourceManager().isWrittenInMainFile(
-                          RelateVar->getBeginLoc()))
-      return;
-    FullSourceLoc FullLocation =
-        Context->getFullLoc(RelateVarDecl->getBeginLoc());
-    int col = FullLocation.getSpellingLineNumber();
-    if (mark[col] == 0)
-      mark[col] = 1;
-    FullLocation = Context->getFullLoc(RelateVar->getBeginLoc());
-    col = FullLocation.getSpellingLineNumber();
-    if (mark[col] == 0)
-      mark[col] = 6;
-  }
+class VarRefPrinter : public MatchFinder::MatchCallback {
+	public:
+		virtual void run(const MatchFinder::MatchResult &Result) {
+			ASTContext *Context = Result.Context;
+			const DeclRefExpr *RelateVarDecl =
+				Result.Nodes.getNodeAs<clang::DeclRefExpr>("varDeclRef");
+			if (!RelateVarDecl )
+				return;
+			FullSourceLoc FullLocation =
+				Context->getFullLoc(RelateVarDecl->getBeginLoc());
+			const NamedDecl *VarDecl = RelateVarDecl->getFoundDecl();
+			int col = FullLocation.getSpellingLineNumber();
+			if(col>=func_bound[0].first&&col<=func_bound[0].second)
+				return;
+			std::string Name = VarDecl->getNameAsString();
+			if(mark[col] == 1||mark[col] == 10)
+			{
+				string tem = source_file[col-1];
+				int id = tem.find(',');
+				if(tem.find(Name,id+1)==tem.npos)return;
+			}
+			var_occur_col[Name].push_back(col);
+			for (auto it : ref_list[col])
+				Link(it,Name);
+			ref_list[col].insert(Name);
+		}
+};
+class FuncDeclPrinter : public MatchFinder::MatchCallback{	//找出各个参与者的语料范围
+	public:
+		virtual void run(const MatchFinder::MatchResult &Result) {
+			ASTContext *Context = Result.Context;
+			const FunctionDecl*FuncDecl =
+				Result.Nodes.getNodeAs<clang::FunctionDecl>("func");
+			if (!FuncDecl || !Context->getSourceManager().isWrittenInMainFile(
+						FuncDecl->getBeginLoc()))
+				return;
+
+			FullSourceLoc FullLocation =
+				Context->getFullLoc(FuncDecl->getBeginLoc());
+			int col = FullLocation.getSpellingLineNumber();
+			if(FuncDecl->isMain())
+			{
+				int end_col = (Context->getFullLoc(FuncDecl->getEndLoc())).getSpellingLineNumber();
+				func_bound[0].first=col;
+				func_bound[0].second=end_col;
+
+			}
+			if(participate_col.size()&&col == participate_col.back() )
+			{
+				int end_col = (Context->getFullLoc(FuncDecl->getEndLoc())).getSpellingLineNumber();
+				func_bound.push_back(make_pair(col,end_col));
+				participate_col.pop_back();
+			}
+
+		} 
 };
 
-int main(int argc, const char **argv) {
-  path_file = "result.cpp"; //默认输出路径
-  for (int counts = 0; counts < argc;++counts)
-  {
-    if(strcmp(argv[counts],"-p")==0)
-    {
-      path_file = argv[counts + 1];
-      for (int i = counts; i <argc-2; ++i)
-      {
-        argv[i] = argv[i + 2];
-      }
-        argc -= 2;
-        counts -= 2;
-    }
-    
-  }
-  CommonOptionsParser OptionsParser(argc, argv, MyToolCategory);
-  const vector<string> sourceList = OptionsParser.getSourcePathList();
+int main(int argc, const char **argv){
+	string path_file = "result.cpp"; //默认输出路径
+	for (int counts = 0; counts < argc;++counts)
+	{
+		if(strcmp(argv[counts],"-p")==0)
+		{
+			path_file = argv[counts + 1];
+			for (int i = counts; i <argc-2; ++i)
+			{
+				argv[i] = argv[i + 2];
+			}
+			argc -= 2;
+			counts -= 2;
+		}
 
-  bool badcase1 = 0;
-  bool is_equal = 1;
-  //建图
-  string mc, nc;
-  //获取参与者数量
-  participate_num = sourceList.size();
-  //获取参与者名
-  ismulti.resize(participate_num);
-  for (auto it : sourceList) {
-    int id = it.rfind("/");
-    string filename = it.substr(id + 1, it.find('.', id) - id - 1);
-    par_name.push_back(filename);
-  }
+	}
+	CommonOptionsParser OptionsParser(argc, argv, MyToolCategory);
+	const vector<string> sourceList = OptionsParser.getSourcePathList();
+	for (auto it : sourceList) //循环t处理所有待转化文件
+	{
+		Init();
+		fstream file;
+		file.open(it);
+		string temp;
+		int line_count = 0;
+		int par_num[]={0,1,5};
+		unuse_var.insert("par");
+		while (getline(file, temp))
+		{
+			source_file.push_back(temp);
+			line_count++;
+			if(temp.find(tag1)!=temp.npos)
+			{
+				participate_col.push_back(line_count);
+				int id = temp.find(tag1);
+				string temp_name = temp.substr(id+tag1.length(),temp.length()-id-tag1.length());
+				//cout<<"temp_name : "<<temp_name<<endl;
+				par_name.push_back(temp_name);
+				parname_to_id[temp_name]=par_name.size();
+			}
 
-  string struct_name[3] = {"P", "Q", "M"};
-  string iterator_name[3] = {"p", "q", "m"};
-  vector<int> insert_line_id;
-  for (int j = 0; j < participate_num; ++j) {
-    ClangTool Tool(OptionsParser.getCompilations(), sourceList[j]);
-    fstream file;
-    file.open(sourceList[j]);
-    string temp;
-    while (getline(file, temp))
-      source_file.push_back(temp);
+		}
+		participate_num = participate_col.size();
 
-    int sz = source_file.size();
-    for (int i = 0; i <= sz + 5; ++i)
-      mark[i] = 0;
-    SendPrinter sendPrinter;
-    RecvPrinter recvPrinter;
-    RelateForPrinter relateForPrinter;
-    RelateVarDeclPrinter relateVarDeclPrinter;
-    RelateIfPrinter relateIfPrinter;
-    MatchFinder Finder1, Finder2,Finder3;
-    Finder1.addMatcher(SendMatcher, &sendPrinter);
-    Finder1.addMatcher(RecvMatcher, &recvPrinter);
-    Tool.run(newFrontendActionFactory(&Finder1).get());
+		reverse(participate_col.begin(),participate_col.end());	
 
-    for (auto var : var_name) 
-      struct_id[var] = j+1;
-    for(auto temp:source_file){
-      if(temp.find("=",0)!=temp.npos&&temp.find("==",0)==temp.npos&&temp.find("for")==temp.npos&&temp.find("if")==temp.npos){
-        int id = temp.find('=', 0);
-        string lvar = temp.substr(0, id);
-        string rvar = temp.substr(id + 1, temp.length() - id - 1);
-        lvar = getVarName(trim(lvar));
-        rvar = getVarName(trim(rvar));
-        if((struct_id[lvar]==0&&struct_id[rvar]==0)||(lvar[0]=='\"'&&lvar[lvar.length()-1]=='\"')||(rvar[0]=='\"'&&rvar[rvar.length()-1]=='\"'))
-          continue;
-        if(lvar=="r"||lvar=="i"||lvar=="j"||lvar=="k"||rvar=="r"||rvar=="i"||rvar=="j"||rvar=="k")
-          continue;
-        var_name.insert(lvar);
-        var_name.insert(rvar);
-      }
-    }
-    for (auto var : var_name) {
-      struct_id[var] = j+1;
-      StatementMatcher RelateVarDecl =
-          declRefExpr(to(varDecl(hasName(var)).bind("relateVar")))
-              .bind("varDeclRef");
-      Finder2.addMatcher(RelateVarDecl, &relateVarDeclPrinter);
-    }
-    Finder3.addMatcher(RelateForMatcher, &relateForPrinter);
-    Finder3.addMatcher(RelateIfMatcher, &relateIfPrinter);
-    Tool.run(newFrontendActionFactory(&Finder2).get());
-    Tool.run(newFrontendActionFactory(&Finder3).get());
+		ClangTool Tool(OptionsParser.getCompilations(),it);
 
-    
-    //生成结构体声明首部
-    bool has_iter = false;
-    string las_recvfrom,las_sendto;
-    head_declare.push_back("struct " + par_name[j] + "{");
-    for (int i = 1; i <= sz; ++i)
-        if (mark[i] == 1)
-        {
-          int k;
-          for (k = 0; k < source_file[i - 1].length(); ++k)
-            if (source_file[i - 1][k] != ' ')
-              break;
-          intermediate_structure.push_back(source_file[i - 1].substr(k, source_file[i - 1].length() - k));
-        } else if (mark[i] == 2) {
-        intermediate_structure.push_back("Loop_Begin("+iterator_name[!j]+":" + par_name[!j] + ")");
-        has_iter = true;
-      } else if (mark[i] == 3) {
-        string name=(has_iter?iterator_name[!j]:par_name[!j]);
-        int id1 = source_file[i - 1].find("(");
-        int id2 = source_file[i - 1].find(",", id1 + 1);
-        las_sendto = trim(source_file[i - 1].substr(id1 + 1, id2 - id1 - 1));
-        if(has_iter)
-        {
-          if(las_sendto!=las_recvfrom&&las_recvfrom!="")
-            is_equal = false;
-        }
-        intermediate_structure.push_back("send("+name+"," + getParam(i, 1) + ")");
-      } else if (mark[i] == 4) {
-        string name=(has_iter?iterator_name[!j]:par_name[!j]);
-        intermediate_structure.push_back(getParam(i, 1) + "<-receive("+name+")");
-        int id1 = source_file[i - 1].find("(");
-        int id2 = source_file[i - 1].find(",", id1 + 1);
-        las_recvfrom = trim(source_file[i - 1].substr(id1+1,id2-id1-1));
-        if(has_iter)
-        {
-          if(las_sendto!=las_recvfrom&&las_sendto!="")
-            is_equal = false;
-        }
-      } else if (mark[i] == 5) {
-        intermediate_structure.push_back("Loop_End");
-        has_iter = false;
-      } else if (mark[i] == 6) {
-        head_declare.push_back("\t"+trim(source_file[i - 1]));//生成结构体内部成员定义
-      } else{
-        if(source_file[i-1].find("#include")!=source_file[i-1].npos)
-        {
-          string unuse_header[] = {"unistd", "arpa/inet", "sys/socket", "iostream", "pthread", "cstring","netinet","assert"};
-          bool flag = 0;
-          for (int k = 0; k < 8;++k)
-          {
-            if(source_file[i-1].find(unuse_header[k],0)!=source_file[i-1].npos)
-            {
-              flag = 1;
-              break;
-            }
-          }
-          if(flag==0)
-            include_header.insert(source_file[i - 1]);
-        }
-        if(source_file[i-1].find("assert(")!=source_file[i-1].npos)
-        {
-          intermediate_structure.push_back(trim(source_file[i - 1]));
-        }
-        if(source_file[i-1].find("using namespace")!=source_file[i-1].npos)
-        {
-          int k;
-          for (k = 0; k < source_file[i - 1].length(); ++k)
-            if (source_file[i - 1][k] != ' ')
-              break;
-          name_space_declare.insert(source_file[i - 1].substr(k, source_file[i - 1].length() - k));
-        }
-      }
+		func_bound.push_back(make_pair(0,0));
+		cutted_file.resize(participate_num+2);
+		Cut(Tool);
+	//	Output cutted file	
+	//	for(int i = 0;i<=participate_num;++i)
+	//	{
+	//		for(auto its :cutted_file[i])
+	//			cout<<its<<endl;
+	//		cout<<"\n------------------------\n";
+	//	}
+		puts("Successfully cut the file!");
+		cur_node_id.resize(participate_num+2);
+		GenerateNodeList(participate_num);
+		puts("Successfully generate node list!");
+		node * start_node = LinkNode(participate_num);
 
-    insert_line_id.push_back(head_declare.size());
-    head_declare.push_back("");
+		node * node_iter = start_node;
+		int loop_depth = 0;
+		int mx_depth = 0;
+		while(node_iter!=NULL)
+		{
+			if(node_iter->contain("Loop_Begin"))
+			{
+				loop_depth++;
+				node_iter->loop_depth=loop_depth;
+				mx_depth=max(mx_depth,loop_depth);
+			}
+			else if(node_iter->contain("Loop_End"))
+			{
+				node_iter->loop_depth=loop_depth;
+				loop_depth--;
+			}
+			node_iter = node_iter->nex;
 
-    file.close();
-    source_file.clear();
-    var_name.clear();
-    if (j != participate_num - 1)
-      intermediate_structure.push_back("||");
+		}
 
+		cout<<"#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <pthread.h>\n#include <assert.h>\n#include <stdbool.h>";
 
-  }
-  // for(auto it:intermediate_structure)
-  //   cout << it << endl;
-  // puts("-------------------------");
+		for(int i = 1;i<=participate_num;++i)
+		{
+			cout<<"\nstruct "<<toUpperCase(par_name[i-1])<<"{";
+
+			for(auto var:var_name)
+			{
+				for(auto decl_col : var_decl_col[var])
+				{
+					if(decl_col>=func_bound[i].first&&decl_col<=func_bound[i].second)
+						cout<<"\n\t"<<source_file[decl_col-1];
+
+				}
+			}
+
+			cout<<"\n}";
+			for(int j =1;j<=par_num[i];++j)
+			{
+				if(j!=1)cout<<",";
+				cout<<toLowerCase(par_name[i-1])<<j;
+			}
+			cout<<";\n";
+		}
+		for(int i=1;i<=par_num[2];++i)
+		{
+			cout<<"\nvoid* Thread_"<<i<<"(void * par){";
+
+			for(int j = 1;j<=par_num[1];++j)
+			{
+				node * node_iter = start_node;
+				while(node_iter!=NULL)
+				{
+					if(node_iter->contain("send("))
+					{
+						string sends = node_iter->tex;
+						node_iter = node_iter->nex;
+						if(!node_iter->contain("recv"))
+							cout<<"Error:send without recv!";
+						string recvs = node_iter->tex;
+						int sid1 = sends.find("(");
+						int sid2 = sends.find(",",sid1+1);
+						int sid3 = sends.find(")",sid2+1);
+						int rid1 = recvs.find("(");
+						int rid2 = recvs.find(",",rid1+1);
+						int rid3 = recvs.find(")",rid2+1);
+						int pos[3]={0,j,i};
+						string recv_par = trim(sends.substr(sid1+1,sid2-sid1-1));
+						string Lpar = trim(recvs.substr(rid2+1,rid3-rid2-1));
+						if(var_name.find(Lpar)!=var_name.end() || unuse_var.find(Lpar)!=unuse_var.end())
+							Lpar = toLowerCase(recv_par)+to_string(pos[parname_to_id[recv_par]])+"."+Lpar;
+						string send_par = trim(recvs.substr(rid1+1,rid2-rid1-1));
+						string Rpar = trim(sends.substr(sid2+1,sid3-sid2-1));
+						if(var_name.find(Rpar)!=var_name.end() || unuse_var.find(Rpar)!=unuse_var.end())
+							Rpar = toLowerCase(send_par)+to_string(pos[parname_to_id[send_par]])+"."+Rpar;
+
+						cout<<"\n\t"<<Lpar<<" = "<<Rpar<<";";
+					}
+					else if(node_iter->contain("Loop_Begin("))
+					{
+						if(node_iter->loop_depth == mx_depth)
+							cout<<"\n\t__VERIFIER_atomic_begin();";
+					}
+					else if(node_iter->contain("Loop_End("))
+					{
+						if(node_iter->loop_depth == mx_depth)
+							cout<<"\n\t__VERIFIER_atomic_end();";
+					}
+					else if (node_iter->contain("par"))
+					{
+						string name;
+						int k;
+						int pos[3]={0,j,i};
+						for(k=1;k<=participate_num;++k)
+							if(find(cutted_file[k].begin(),cutted_file[k].end(),node_iter->tex)!=cutted_file[k].end())break;
+						name = toLowerCase(par_name[k-1])+to_string(pos[k])+".";
+						cout<<"\n\t"<<name<<node_iter->tex;
+					}
+					else if(node_iter->tex!="")
+						cout<<"\n\t"<<node_iter->tex;
+					node_iter = node_iter->nex;
+				}
 
 
-  int lasto = -1;
-  int loopheadnum = 0; //循环头数
-  for (auto mc : intermediate_structure) {
-    if (mc == "||" || start_index.size() == 0) {
-      start_index.push_back(P.size());
-      par_position.push_back(P.size());
-      loopheadnum = 0;
-    }
-    if (mc == "||")
-      continue;
-    if (mc.find("Loop_Begin", 0) != mc.npos) {
-      is_in_Loop = 1;
-      int id1 = mc.find("(", 0);
-      int id2 = mc.find(":", 0);
-      int id3 = mc.find(")", 0);
-      string key = mc.substr(id1 + 1, id2 - id1 - 1);
-      string value = mc.substr(id2 + 1, id3 - id2 - 1);
-      // cout<<key<<" "<<value<<endl;
-      for (int i = 0; i < participate_num; i++) {
-        if (value == par_name[i]) {
-          mp[key] = i + 1;
-          ismulti[i] = 1;
-          break;
-        }
-      }
-      loopheadnum++;
-      Loopstmt.push(mc);
-      continue;
-    } else if (mc == "Loop_End" && P.size()) {
-      is_in_Loop = 0;
-      lasrecv.clear();
-      P.back().endcontent.push_back(Loopstmt.top());
-      string loophead = Loopstmt.top();
-      int id1 = loophead.find("(", 0);
-      int id2 = loophead.find(":", 0);
-      string key = loophead.substr(id1 + 1, id2 - id1 - 1);
-      Loopstmt.pop();
-      mp[key] = 0;
-      continue;
-    }
-    node newm = node(mc);
-    newm.begincnt = loopheadnum;
-    loopheadnum = 0;
-    if (newm.contain("send(")) {
-      int id1 = newm.content.find("(", 0);
-      int id2 = newm.content.find(",", 0);
-      string temp = newm.content.substr(id1 + 1, id2 - id1 - 1);
-      if (is_in_Loop && lasrecv.size()&&is_equal==false) {
-        badcase1 = 1;
-        for (auto I : lasrecv) {
-          if (I == temp) {
-            badcase1 = 0;
-            break;
-          }
-        }
-        if (badcase1)
-          iserror = true;
-      }
-      if (mp[temp] == 0) {
-        for (int i = 0; i < participate_num; i++) {
-          if (temp == par_name[i]||temp == iterator_name[i]) {
-            newm.to = i;
-            break;
-          }
-        }
-      } else
-        newm.to = mp[temp] - 1;
-    } else if (newm.contain("<-receive(")) {
-      vector<string> tempar = newm.getparam();
-      if (is_in_Loop)
-        lasrecv.push_back(tempar[0]);
-      for (auto it : tempar) {
-        if (it == "id") {
-          int id1 = newm.content.find("(", 0);
-          int id2 = newm.content.find(")", id1);
-          string recvfrom = newm.content.substr(id1 + 1, id2 - id1 - 1);
-          if (mp[recvfrom])
-            mp["id"] = mp[recvfrom];
-          for (int i = 0; i < participate_num; i++) {
-            if (recvfrom == par_name[i]) {
-              mp["id"] = i + 1;
-              break;
-            }
-          }
-        }
-      }
-    }
-    if (P.size() && P.size() != start_index.back())
-      P.back().nex = P.size();
-    P.push_back(newm);
-  }
-  for (int j = 0; j < participate_num;++j)
-  {
-    if(ismulti[j])
-      head_declare[insert_line_id[j]] = "}" + struct_name[j] + "[100];";
-    else
-      head_declare[insert_line_id[j]] = "}" + struct_name[j] + ";";
-  }
-  start_index.push_back(P.size());
-  //串联语句并转化成赋值
-  solve();
-  //有错误
-  
-  if (iserror) {
- 
-    if (badcase1)
-      puts("Error:Communicate with different qs in Q in one iteration!");
-  } else { 
-    if(ismulti[0]&&ismulti[1])
-      head_declare.push_back("struct Pair{\n\tint id_p;\n\tint id_q;\n};\n");
-    transformToAssignment(start_index[firstSenderId]);
-    //输出转化后结果
-    output();
-    //生成主函数
-    main_function.push_back("int main()\n{\n");
-    int loop_round = 0;
-    int atomic_block_num = 0;
-    bool in_thread = false;
-    string iter_var[4] = {"r","i", "j", "k"};
-    string Tab = "\t";
-    if(is_roundN==0)
-      loop_round++;
-    for(auto it:transf_intermediate)
-    {
-      if(it.find("Atomic_Begin",0)!=it.npos)
-      {
-        atomic_block_num++;
-        if(in_thread==false)
-        {
-          main_function.push_back(Tab+"for( int " + iter_var[loop_round] + " ; " + iter_var[loop_round] + " < 100 ; ++" + iter_var[loop_round] + ")\n" + Tab + "{\n");
-          loop_round++;
-          Tab += "\t";
-          in_thread = true;
-          
-          if(ismulti[0]&&ismulti[1]){
-            main_function.push_back(Tab + "pthread_t id;\n" + Tab + "int ret = 0;\n" + Tab + "Pair par;\n");
-            thread.push_back("void* Thread(void * par)\n{\n\tint id_p = ((Pair *)par)->id_p;\n\tint id_q = ((Pair *)par)->id_q;\n");
-            main_function.push_back(Tab+"par.id_p = "+iter_var[loop_round-2]+";\n"+Tab+"par.id_q = "+iter_var[loop_round-1]+";\n"+Tab+"ret = pthread_create(&id, NULL, Thread, &par);\n"+Tab+"pthread_join(id, NULL);\n");
-          }
-          else if(!ismulti[0]&&ismulti[1]){
-            main_function.push_back(Tab + "pthread_t id;\n" + Tab + "int ret = 0;\n");
-            thread.push_back("void* Thread(void * par)\n{\n\tint id_q = *((int *)par);\n");
-            main_function.push_back(Tab+"ret = pthread_create(&id, NULL, Thread, &"+iter_var[loop_round-1]+");\n"+Tab+"pthread_join(id,NULL);\n");
-          }
-        }
-        thread.push_back("\twhile (mutex" + to_string(atomic_block_num) + " == true);\n\tmutex" + to_string(atomic_block_num) + " = true;\n");
-        head_declare.push_back("bool mutex" + to_string(atomic_block_num) + " = false;\n");
+			}
 
-      }
-      else if(it.find("Atomic_End",0)!=it.npos)
-      {
-        thread.push_back("\tmutex"+to_string(atomic_block_num)+" = false;\n");
-      }
-      else if(it.find("Loop_Begin",0)!=it.npos)
-      {
-        if(iter_var[loop_round]=="r")
-        {
-          main_function.push_back(Tab+"for( r=0 ; r < 100 ; ++r)\n" + Tab + "{\n");
-          head_declare.push_back("int r;\n");
-        }
-        
-        else
-        main_function.push_back(Tab+"for( int " + iter_var[loop_round] + " ; " + iter_var[loop_round] + " < 100 ; ++" + iter_var[loop_round] + ")\n" + Tab + "{\n");
-        loop_round++;
-        Tab += "\t";
-      }
-      else if(it.find("Loop_End",0)!=it.npos)
-      {
-        if(in_thread)
-        {
-          in_thread = false;
-          Tab.pop_back();
-          main_function.push_back(Tab + "}\n");
-          loop_round--;
-        }
-        Tab.pop_back();
-        main_function.push_back(Tab + "}\n");
-        loop_round--;
-      }
-      else if(it.find('=',0)!=it.npos&&it.find("==",0)==it.npos)
-      {
-        if(in_thread==false)
-        {
-          main_function.push_back(Tab+"for( int " + iter_var[loop_round] + " ; " + iter_var[loop_round] + " < 100 ; ++" + iter_var[loop_round] + ")\n" + Tab + "{\n");
-          loop_round++;
-          Tab += "\t";
-          in_thread = true;
-          
-          if(ismulti[0]&&ismulti[1]){
-            main_function.push_back(Tab + "pthread_t id;\n" + Tab + "int ret = 0;\n" + Tab + "Pair par;\n");
-            thread.push_back("void* Thread(void * par)\n{\n\tint id_p = ((Pair *)par)->id_p;\n\tint id_q = ((Pair *)par)->id_q;\n");
-            main_function.push_back(Tab+"par.id_p = "+iter_var[loop_round-2]+";\n"+Tab+"par.id_q = "+iter_var[loop_round-1]+";\n"+Tab+"ret = pthread_create(&id, NULL, Thread, &par);\n"+Tab+"pthread_join(id, NULL);\n");
-          }
-          else if(!ismulti[0]&&ismulti[1]){
-            main_function.push_back(Tab + "pthread_t id;\n" + Tab + "int ret = 0;\n");
-            thread.push_back("void* Thread(void * par)\n{\n\tint id_q = *((int *)par);\n");
-            main_function.push_back(Tab+"ret = pthread_create(&id, NULL, Thread, &"+iter_var[loop_round-1]+");\n"+Tab+"pthread_join(id,NULL);\n");
-          }
-        }
-        int id = it.find('=', 0);
-        string lvar = it.substr(0, id);
-        string rvar = it.substr(id + 1, it.length() - id - 1);
-        string lmember = "";
-        string rmember = "";
-        lvar = trim(lvar);
-        rvar = trim(rvar);
-        if(lvar.find('.',0)!=lvar.npos)
-        {
-          int did = lvar.find('.', 0);
-          lmember=lvar.substr(did,lvar.length()-did);
-          lvar=lvar.substr(0, did);
-        }
-          
-        if(rvar.find('.',0)!=rvar.npos)
-        {
-          int did = rvar.find('.', 0);
-          rmember=rvar.substr(did,rvar.length()-did);
-          rvar=rvar.substr(0, did);
-        }
-         if(lvar.find('[',0)!=lvar.npos)
-        {
-          int did = lvar.find('[', 0);
-          lmember=lvar.substr(did,lvar.length()-did)+lmember;
-          lvar=lvar.substr(0, did);
-        }
-          
-        if(rvar.find('[',0)!=rvar.npos)
-        {
-          int did = rvar.find('[', 0);
-          rmember=rvar.substr(did,rvar.length()-did)+rmember;
-          rvar=rvar.substr(0, did);
-        }
-        lmember=changeVar(lmember);
-        rmember = changeVar(rmember);
-        lvar=getVarName(lvar);
-        rvar = getVarName(rvar);
-        string temlvar = lvar;
-        string temrvar = rvar;
-        if(rvar=="i")
-          rvar = "id_q", trans_var["i"] = "id_q";
-        else if(rvar=="j")
-          rvar = "id_p", trans_var["j"] = "id_p";
-        if(struct_id[lvar])
-        {
-          int k = struct_id[lvar];
-          if(ismulti[k-1])
-            {
-              if(in_thread)
-                lvar = struct_name[k-1] + "[" + (k==1?"id_p":"id_q") + "]." + lvar;
-              else
-                lvar = struct_name[k-1] + "[" + iter_var[loop_round-2+k] + "]." + lvar;
-            }
-            else
-            lvar = struct_name[k-1] + "." + lvar;
-        }
-        string x;
-        trans_var[temlvar] = lvar;
-        trans_var[temrvar] = rvar;
-        if(struct_id[rvar])
-        {
-          int k = struct_id[rvar];
-          if(ismulti[k-1])
-          {
-            if(in_thread)
-              rvar = struct_name[k-1] + "[" + (k==1?"id_p":"id_q") + "]." + rvar;
-            else
-              rvar = struct_name[k-1] + "[" + iter_var[loop_round-2+k] + "]." + rvar;
-          }
-          else
-          rvar = struct_name[k-1] + "." + rvar;
-        }
-        x = lvar + lmember + " = " + rvar + rmember + ";";
-        if(in_thread)
-          thread.push_back("\t"+x);
-        else
-          main_function.push_back(Tab + x);
-      }
-      else if(it.find("assert(")!=it.npos||it.find("if(")!=it.npos||it.find("else if(")!=it.npos)
-      {
-        string tem = changeVar(it);
-        if(in_thread)
-          thread.push_back("\t"+tem);
-        else
-          main_function.push_back(Tab + tem);
-      }
-      else
-      {
-        if(in_thread==false)
-        {
-          main_function.push_back(Tab+"for( int " + iter_var[loop_round] + " ; " + iter_var[loop_round] + " < 100 ; ++" + iter_var[loop_round] + ")\n" + Tab + "{\n");
-          loop_round++;
-          Tab += "\t";
-          in_thread = true;
-          
-          if(ismulti[0]&&ismulti[1]){
-            main_function.push_back(Tab + "pthread_t id;\n" + Tab + "int ret = 0;\n" + Tab + "Pair par;\n");
-            thread.push_back("void* Thread(void * par)\n{\n\tint id_p = ((Pair *)par)->id_p;\n\tint id_q = ((Pair *)par)->id_q;\n");
-            main_function.push_back(Tab+"par.id_p = "+iter_var[loop_round-2]+";\n"+Tab+"par.id_q = "+iter_var[loop_round-1]+";\n"+Tab+"ret = pthread_create(&id, NULL, Thread, &par);\n"+Tab+"pthread_join(id, NULL);\n");
-          }
-          else if(!ismulti[0]&&ismulti[1]){
-            main_function.push_back(Tab + "pthread_t id;\n" + Tab + "int ret = 0;\n");
-            thread.push_back("void* Thread(void * par)\n{\n\tint id_q = *((int *)par);\n\twhile (mutex"+to_string(atomic_block_num)+" == true);\n\tmutex"+to_string(atomic_block_num)+" = true;\n");
-            main_function.push_back(Tab+"ret = pthread_create(&id, NULL, Thread, &"+iter_var[loop_round-1]+");\n"+Tab+"pthread_join(id,NULL);\n");
-          }
-        }
-        if(in_thread)
-          thread.push_back("\t"+it);
-        else
-          main_function.push_back(Tab + it);
-      }
-    }
-    if(in_thread)
-    {
-       in_thread = false;
-        Tab.pop_back();
-        main_function.push_back(Tab + "}\n");
-        loop_round--;
-    }
-    thread.push_back("\treturn 0;\n}\n");
-    main_function.push_back("\treturn 0;\n}\n");
-    include_header.insert("#include <iostream>");
-    include_header.insert("#include <pthread.h>");
-    include_header.insert("#include <cstring>");
-    include_header.insert("#include <assert.h>");
+			cout<<"\n\treturn 0;\n}";
+		}
 
-    ofstream in(path_file);
-    for (auto it : include_header)
-      in
-          << it << endl;
-    for (auto it : name_space_declare)
-      in
-          << it << endl;
-    for(auto it:head_declare)
-      in << it<<endl;
-    for(auto it:thread)
-      in << it<<endl;
-    for(auto it:main_function)
-      in << it<<endl;
-  }
+		cout<<"\nint main(){\n\tpthread_t thread["<<par_num[2]<<"];";
+
+		for(int i = 1;i<=par_num[2];++i)
+			printf("\n\tpthread_create(&thread[%d], NULL, Thread_%d, NULL);",i,i);	
+
+		cout<<"\n\tfor( int i = 1; i <= "<<par_num[2]<<"; i++)\n\t\tpthread_join(thread[i], &i);\n\treturn EXIT_SUCCESS;\n}";
+	}
 }
-bool compa(string A, string B) {
-  int id1 = A.find(":", 0);
-  int id2 = A.find(")", 0);
-  string value1 = A.substr(id1 + 1, id2 - id1 - 1);
-  int id3 = B.find(":", 0);
-  int id4 = B.find(")", 0);
-  string value2 = B.substr(id3 + 1, id4 - id3 - 1);
-  int idA = 0, idB = 0;
-  int cnt = 0;
-  for (auto it : par_name) {
-    if (value1 == it)
-      idA = cnt;
-    if (value2 == it)
-      idB = cnt;
-    cnt++;
-  }
-  return idA > idB;
-}
-void link(int parid) {
-  int sid = par_position[parid];
-  if (sid >= start_index[parid + 1])
-    return;
-  //找到当前参与者中的send语句
-  while (sid < start_index[parid + 1] && P[sid].contain("send(") == 0)
-    sid++;
-  if (sid >= start_index[parid + 1])
-    return;
 
-  //找到该send语句的发送目标
-  int destination = P[sid].to;
-  par_position[parid] = sid + 1;
-  int rid = par_position[destination];
-
-  // cout << P[sid].content << " " << P[sid].to << endl;
-  // cout << rid << " " << destination << " " << start_index[destination + 1] << endl;
-
-  //找到send语句对应的receive语句
-  while (rid < start_index[destination + 1] && P[rid].contain("<-receive(") == 0)
-    rid++;
-  if (rid >= start_index[destination + 1]) {
-    puts("Send without Receive!");
-    iserror = 1;
-    return;
-  }
-  //连接
-  P[sid].nex = rid;
-
-  //上传recive语句的循环头至send
-  if (P[rid].begincnt && ismulti[destination]) {
-    P[sid].begincnt += P[rid].begincnt;
-    P[rid].begincnt = 0;
-  }
-
-  if (ismulti[parid]) {
-    //下传send语句的循环尾
-    int temrid = rid;
-    while (temrid < start_index[destination + 1] &&
-           P[temrid].contain("send(") == 0 && P[temrid].endcontent.size() == 0 &&
-           P[temrid].begincnt == 0)
-      temrid++;
-    if (temrid >= start_index[destination + 1] || P[temrid].contain("send(") ||
-        P[temrid].begincnt && temrid > rid)
-      temrid--;
-    P[temrid].endcontent.insert(P[temrid].endcontent.begin(),
-                                P[sid].endcontent.begin(),
-                                P[sid].endcontent.end());
-    P[sid].endcontent.clear();
-  }
-
-  par_position[destination] = rid + 1;
-  link(destination);
-}
-void transformToAssignment(int stid) {
-  while (stid != -1) {
-    if (P[stid].contain("send(")) {
-      int nx = P[stid].nex;
-      if (nx == -1 || P[nx].contain("<-receive(") == 0) {
-        cout << "Wrong Answer!place2\n";
-        exit(0);
-      }
-      vector<string> sendpar = P[stid].getparam();
-      vector<string> recvpar = P[nx].getparam();
-      int sz1 = sendpar.size();
-      if (sz1 != recvpar.size()) {
-        cout << "Wrong Answer!place3\n";
-        exit(0);
-      }
-      if (P[stid].begincnt) {
-        int num = P[stid].begincnt;
-        lasbegincnt.push(num);
-        while (num--) {
-          emptyid.push((int)result.size());
-          result.push_back("");
-        }
-      }
-      if (P[nx].begincnt) {
-        int num = P[nx].begincnt;
-        lasbegincnt.push(num);
-        while (num--) {
-          emptyid.push((int)result.size());
-          result.push_back("");
-        }
-      }
-      for (int i = 0; i < sz1; ++i) {
-        string recv = recvpar[i];
-        string send = sendpar[i];
-        string ass = recvpar[i] + "=" + sendpar[i];
-        result.push_back(ass);
-      }
-      if (P[nx].endcontent.size() > 0) {
-        std::sort(P[nx].endcontent.begin(),
-                  P[nx].endcontent.begin() + lasbegincnt.top(), compa);
-        lasbegincnt.pop();
-        for (auto it : P[nx].endcontent) {
-          if (emptyid.empty()) {
-            cout << "Wrong Answer!place1!\n";
-            exit(0);
-          }
-          result[emptyid.top()] = it;
-          int desz = emptyid.size();
-          dep[emptyid.top()] = desz;
-          mxde = max(mxde, (int)emptyid.size());
-          emptyid.pop();
-          dep[result.size()] = desz;
-          result.push_back("Loop_End");
-        }
-      }
-      if (P[stid].endcontent.size() > 0) {
-        std::sort(P[stid].endcontent.begin(),
-                  P[stid].endcontent.begin() + lasbegincnt.top(), compa);
-        lasbegincnt.pop();
-        for (auto it : P[stid].endcontent) {
-          if (emptyid.empty()) {
-            cout << "Wrong Answer!place1!\n";
-            exit(0);
-          }
-          result[emptyid.top()] = it;
-          int desz = emptyid.size();
-          dep[emptyid.top()] = desz;
-          mxde = max(mxde, (int)emptyid.size());
-          emptyid.pop();
-          dep[result.size()] = desz;
-          result.push_back("Loop_End");
-        }
-      }
-      stid = nx;
-    } else if (P[stid].contain("<-receive("))
-      ;
-    else {
-      if (P[stid].begincnt) {
-        int num = P[stid].begincnt;
-        lasbegincnt.push(num);
-        while (num--) {
-          emptyid.push((int)result.size());
-          result.push_back("");
-        }
-      }
-      result.push_back(P[stid].content);
-      if (P[stid].endcontent.size() > 0) {
-        std::sort(P[stid].endcontent.begin(),
-                  P[stid].endcontent.begin() + lasbegincnt.top(), compa);
-        lasbegincnt.pop();
-        for (auto it : P[stid].endcontent) {
-          if (emptyid.empty()) {
-            cout << "Wrong Answer!place1!\n";
-            exit(0);
-          }
-          result[emptyid.top()] = it;
-          int desz = emptyid.size();
-          dep[emptyid.top()] = desz;
-          mxde = max(mxde, (int)emptyid.size());
-          emptyid.pop();
-          dep[result.size()] = desz;
-          result.push_back("Loop_End");
-        }
-      }
-    }
-
-    stid = P[stid].nex;
-  }
-}
-int findTheFirstSender() {
-  int id = -1;
-  bool flag = 0;
-  for (int i = 0; i < start_index.size() - 1; ++i) {
-    for (int j = start_index[i]; j < start_index[i + 1]; ++j) {
-      if (P[j].contain("send(")) {
-        if (id == -1) {
-          id = i;
-          break;
-        } else {
-          flag = 1;
-          puts(
-              "Error:Repeated sending and receiving!Try to modify as follows:");
-        }
-      }
-      if (P[j].contain("<-receive(")) {
-        if (flag) //出现SSRR情况
-        {
-          // SSRR纠正处理
-          int endid = start_index[i + 1] - 1;
-          int temj = j - start_index[i];
-          while (temj--) {
-            node tem = P[start_index[i]];
-            for (int k = start_index[i]; k < endid; ++k)
-              P[k] = P[k + 1];
-            P[endid] = tem;
-          }
-          for (int T = start_index[i]; T < start_index[i + 1] - 1; ++T) {
-            P[T].nex = T + 1;
-          }
-          // SSRR处理结束
-        }
-        break;
-      }
-    }
-  }
-  if (id == -1) {
-    iserror = true;
-    puts("Can not find the first sender!"); //没有第一个发送的参与者
-  }
-  return id;
-}
-void output() {
-  int cnt = 0;
-  int lit = -1;
-  string atomic;
-  for (auto it : result) {
-    if (it.find("Loop_Begin", 0) != it.npos && dep[cnt] == mxde) {
-      int id1 = it.find("(", 0);
-      int id2 = it.find(")", id1);
-      atomic = "||" + it.substr(id1, id2 - id1 + 1);
-      for (int i = 0;; i++) {
-        if (result[i].find("Loop_Begin", 0) != result[i].npos &&
-            result[i] != "Loop_Begin(r:R)") {
-          lit = dep[i];
-          break;
-        }
-      }
-      break;
-    }
-    cnt++;
-  }
-  cnt = 0;
-  bool F = 0;
-  if (result[0].find("Loop_Begin", 0) == result[0].npos) {
-    lit = -2;
-    transf_intermediate.push_back(atomic + "{");
-    F = 1;
-  }
-  for (auto it : result) {
-    if (it.find("Loop_Begin", 0) != it.npos) {
-      string temp = "";
-      if (dep[cnt] == lit)
-        temp += atomic;
-      if (dep[cnt] == mxde)
-        temp += "Atomic_Begin";
-      else
-        temp += it;
-      transf_intermediate.push_back(temp);
-    } else if (it.find("Loop_End", 0) != it.npos && dep[cnt] == mxde) {
-      transf_intermediate.push_back("Atomic_End");
-      if (cnt + 1 < result.size() &&
-          result[cnt + 1].find("Loop_Begcd biin", 0) != it.npos &&
-          dep[cnt + 1] == mxde)
-        transf_intermediate.push_back(";");
-    } else
-      transf_intermediate.push_back(it);
-    cnt++;
-  }
-  if (F)
-    transf_intermediate.push_back("}");
-  // for(auto it:transf_intermediate)
-  //   cout << it << endl;
-  // puts("---------------------------");
-}
-void solve() {
-  firstSenderId = findTheFirstSender();
-  if (firstSenderId == -1)
-    return;
-  link(firstSenderId);
-  if (iserror)
-    return;
-}
-string trim(string x){
-  int len = x.length();
-   int L;
-    for (L = 0; L < len; ++L)
-      if (x[L] != ' ')
-        break;
-    int R;
-    for (R=len-1; R >= 0;R--)
-      if (x[R] != ' ')
-        break;
-    return x.substr(L, R - L + 1);
-}
-string getVarName(string temp){
-  int L = -1;
-  int R = temp.length();
-  if(temp.find('&',0)!=temp.npos)
-  L=max(L,(int)temp.find('&',0));
-  if(temp.find('*',0)!=temp.npos)
-  L=max(L,(int)temp.find('*',0));
-  if(temp.find(' ',0)!=temp.npos)
-  L=max(L,(int)temp.find(' ',0));
-  if(temp.find('[',0)!=temp.npos)
-  R=min(R,(int)temp.find('[',0));
-  if(temp.find('.',0)!=temp.npos)
-  R=min(R,(int)temp.find('.',0));
-  if (temp.find(';', 0) != temp.npos)
-    R = min(R, (int)temp.find(';', 0));
-  return trim(temp.substr(L + 1, R - L - 1));
-}
-string changeVar(string it)
+bool node::contain(string x)
 {
-  int len=it.length();
-  int l,r;
-  string x,tem;
-  tem = it;
-  for (l=0; l <len;++l)
-  {
-    for (r = l; r < len; ++r)
-    {
-      x = it.substr(l, r - l + 1);
-      if(trans_var[x]!=""){
-        if(l>0&&isalpha(it[l-1]))
-          continue;
-        if(r<len-1&&isalpha(it[r+1]))
-          continue;
-        l += tem.length() - len;
-        r += tem.length() - len;
-        tem = tem.substr(0, l) + trans_var[x] + tem.substr(r + 1, tem.length() - r - 1);
-      }
-    }
-  }
-  return tem;
+	return this->tex.find(x)!=this->tex.npos;
 }
+string GetF(string x)
+{
+	return (F[x]==x?x:F[x]=GetF(F[x]));
+}
+string trim(string x)
+{
+	int len = x.length();
+	int L;
+	for (L = 0; L < len; ++L)
+		if (x[L] != ' '&&x[L]!='\t'&&x[L]!='&'&&x[L]!='*')
+			break;
+	int R;
+	for (R=len-1; R >= 0;R--)
+		if (x[R] != ' '&&x[R]!='\t')
+			break;
+	return x.substr(L, R - L + 1);
+
+}
+void Init()
+{
+	source_file.clear();
+	sendrecv_col.clear();
+	ref_list.clear();
+	var_name.clear();
+	var_occur_col.clear();
+	var_decl_col.clear();
+	F.clear();
+	remain_var.clear();
+	unuse_var.clear();
+	mark.clear();
+	main_function_begin = 0;
+	depth = 0;
+}
+void Link(string a, string b)
+{
+	string Fa = GetF(a);
+	string Fb = GetF(b);
+	if (Fa!= Fb)
+		F[Fa] = Fb;
+}
+//简化send和recv
+string SimSendRecv(int col,int cur_file_id)
+{
+	string x = source_file[col];
+	int id1 = x.find('(');
+	int id2 = x.find(',', id1+1);
+	int id3 = min(x.find(',', id2 + 1),x.find(')',id2+1));
+	string to;
+	string para = trim(x.substr(id2 + 1, id3 - id2 - 1));
+	if(participate_num == 2)
+	{
+		int to_id = !(cur_file_id-1);
+		to = par_name[to_id];
+	}
+	else
+	{
+		int id4 = x.find("//to ", id3+1);
+		to = trim(x.substr(id4 + 5, x.length() - id4 - 5));
+	}
+	transform(to.begin(),to.end(),to.begin(),::tolower);
+	if(mark[col+1]==1)
+		return "send(" + to + "," + para + ")";
+	else
+		return "recv(" + to + "," + para + ")";
+}
+void Cut(ClangTool Tool)
+{
+
+	int sz = source_file.size();
+	ref_list.resize(sz+3);
+	SendPrinter sendPrinter;
+	RecvPrinter recvPrinter;
+	RelateForPrinter relateForPrinter;
+	VarDeclPrinter varDeclPrinter;
+	// RelateIfPrinter relateIfPrinter;
+	VarRefPrinter varRefPrinter;
+	FuncDeclPrinter funcDeclPrinter;
+
+	MatchFinder Finder1, Finder2,Finder3,Finder4;
+	Finder1.addMatcher(SendMatcher, &sendPrinter);
+	Finder1.addMatcher(RecvMatcher, &recvPrinter);
+	Finder1.addMatcher(FuncDeclMatcher, &funcDeclPrinter); 
+	Tool.run(newFrontendActionFactory(&Finder1).get());
+	Finder2.addMatcher(VarDeclMatcher, &varDeclPrinter);
+	Tool.run(newFrontendActionFactory(&Finder2).get());
+	for (auto var : var_name)
+	{
+		StatementMatcher VarRefMatcher = declRefExpr(to(varDecl(hasName(var)))).bind("varDeclRef");
+		Finder3.addMatcher(VarRefMatcher, &varRefPrinter);
+		F[var] = var;
+	}
+
+	Tool.run(newFrontendActionFactory(&Finder3).get());
+
+
+	for (auto sc : sendrecv_col)
+	{
+		if(ref_list[sc].size()==0)continue;
+		auto first_element = ref_list[sc].begin();
+		remain_var[GetF(*first_element)] = 1;
+	}
+
+	for (auto iter = var_name.begin(); iter != var_name.end();)
+	{
+		if (remain_var[GetF(*iter)] == 0)
+			var_name.erase(iter++);
+		else
+			iter++;
+	}
+
+	for(auto var :var_name)
+	{
+		for(auto it:var_decl_col[var])
+		{
+			if(!mark[it])
+				mark[it] = 12;
+		}
+		for(auto it:var_occur_col[var])
+		{
+			if(!mark[it])
+				mark[it] = 2;
+		}
+	}
+
+	Finder4.addMatcher(RelateForMatcher, &relateForPrinter);
+	Tool.run(newFrontendActionFactory(&Finder4).get());
+
+	//将不同对象的裁剪语料分开存储，全局变量和主函数的关键语句存储在0中
+	int iter =0;
+	for (int i = 1; i <=participate_num; ++i)
+	{
+		int l = func_bound[i].first;
+		int r = func_bound[i].second;
+		while(iter+1<l)
+		{
+			if(mark[iter+1]==2||mark[iter+1]==3)
+				cutted_file[0].push_back(trim(source_file[iter]));
+			else if(mark[iter+1]==1||mark[iter+1]==10)
+				cutted_file[0].push_back(trim(SimSendRecv(iter,participate_num+1)));
+			iter++;
+		}
+		while(iter+1<r)
+		{
+			if(mark[iter+1]==2||mark[iter+1]==3)
+				cutted_file[i].push_back(trim(source_file[iter]));
+			else if(mark[iter+1]==1||mark[iter+1]==10)
+				cutted_file[i].push_back(trim(SimSendRecv(iter,i)));
+			iter++;
+		}
+	}
+	while(iter+1<sz)
+	{
+		if(mark[iter+1]==2)
+			cutted_file[0].push_back(trim(source_file[iter]));
+		else if(mark[iter+1]==1||mark[iter+1]==10)
+			cutted_file[0].push_back(trim(SimSendRecv(iter,participate_num+1)));
+		iter++;
+
+	}
+}
+//生成各参与者的节点序列
+void GenerateNodeList(int participate_num)
+{
+	for (int i = 1; i <= participate_num; i++)
+	{
+		node* las_node;
+		for(int j = 0;j < cutted_file[i].size();++j)
+		{
+			if(j == 0)
+			{
+				las_node = new node(depth, cutted_file[i][j]);
+				cur_node_id[i] = las_node;
+			}
+			else
+			{
+				node* node_temp = new node(depth, cutted_file[i][j]);
+				if (node_temp->contain("Loop_Begin"))
+				{
+					depth++;
+				}
+				else if(node_temp->contain("Loop_End"))
+				{
+					depth--;
+				}
+				//串联节点
+				las_node->nex = node_temp;
+				node_temp->pre = las_node;
+				las_node = node_temp;
+
+			}
+		}
+	}
+}
+int GetDestination(node * x)
+{
+	string tem = x->tex;
+	int id1 = tem.find('(', 0);
+	int id2 = tem.find(',', id1 + 1);
+	return parname_to_id[trim(tem.substr(id1+1,id2-id1-1))];
+}
+node * FindRecv(int id,int from)
+{
+	node * node_iter = cur_node_id[id];
+	for (;node_iter!=NULL;node_iter = node_iter->nex)
+	{
+		if(node_iter->contain("recv(")) 
+		{
+			if(from == GetDestination(node_iter))//是否是要找的recv
+			{
+				cur_node_id[id]=node_iter->nex;//纪录一下已经遍历的位置，下次从此处开始遍历
+				return node_iter;
+			}
+			else
+				puts("format error!");
+		}
+	}
+}		
+//check if the end is reached
+bool CheckIsEnd(node * x,int id)
+{
+	return (x == NULL||((x->contain("Loop_")||x->contain("send(")||x->contain("recv("))&&GetDestination(x)!=id));
+}
+string toUpperCase(string s)
+{
+	transform(s.begin(),s.end(),s.begin(),::toupper);
+	return s;
+}
+string toLowerCase(string s)
+{
+	transform(s.begin(),s.end(),s.begin(),::tolower);
+	return s;
+}
+//串联合并节点序列成一个节点链表
+//send recv尽量贴合 recv前的多余语句置于send前，send后的多余语句置于recv后，这样可互不影响
+//需严格保证每一段只存在两两间的交互，如果不是也可低成本修改
+void LinkPair(int A,int B)
+{
+	bool is_ended_A = false;
+	bool is_ended_B = false;
+	node *tem_iter = cur_node_id[A];
+	for (;tem_iter!=NULL;tem_iter = tem_iter->nex)
+	{
+		if(tem_iter->contain("send("))break;
+		else if(tem_iter->contain("recv("))
+		{
+			swap(A,B);	
+			break;
+		}
+	}
+
+	while(!is_ended_A||!is_ended_B)
+	{
+		if(!is_ended_A)
+		{
+
+			node * node_iter = cur_node_id[A];
+			for (;node_iter!=NULL;node_iter = node_iter->nex)
+			{
+				if (node_iter->contain("send("))
+				{
+					cur_node_id[A]=node_iter->nex;//纪录一下已经遍历的位置，下次从此处开始遍历
+
+					node * head_iter=cur_node_id[B];
+					node * recv_iter=FindRecv(B,A);
+					if(head_iter!=recv_iter) //若recv前有多余部分则至于send语句前
+					{
+						(node_iter->pre)->nex = head_iter;
+						head_iter->pre = node_iter->pre;
+
+					}
+					(recv_iter->pre)->nex = node_iter;
+					node_iter->pre = recv_iter->pre;
+					recv_iter->nex = node_iter->nex;
+					(node_iter->nex)->pre = recv_iter;
+					node_iter->nex = recv_iter; //串联send和recv
+					recv_iter->pre = node_iter;
+
+					break;
+
+				}
+				if (CheckIsEnd(node_iter->nex,B))
+				{
+					cur_node_id[A] = node_iter->nex;
+					is_ended_A = true;
+					break;
+				}
+			}
+			if(node_iter == NULL)
+			{
+				is_ended_A = true;
+			}
+		}
+		if(!is_ended_B)
+		{
+			node * node_iter = cur_node_id[B];
+			for (;node_iter!=NULL;node_iter = node_iter->nex)
+			{
+				if (node_iter->contain("send("))
+				{
+					cur_node_id[B]=node_iter->nex;//纪录一下已经遍历的位置，下次从此处开始遍历
+
+					node * head_iter=cur_node_id[A];
+					node * recv_iter=FindRecv(A,B);
+					if(head_iter!=recv_iter) //若recv前有多余部分则至于send语句前
+					{
+						(node_iter->pre)->nex = head_iter;
+						head_iter->pre = node_iter->pre;
+
+					}
+					(recv_iter->pre)->nex = node_iter;
+					node_iter->pre = recv_iter->pre;
+					recv_iter->nex = node_iter->nex;
+					(recv_iter->nex)->pre = recv_iter;
+					node_iter->nex = recv_iter; //串联send和recv
+					recv_iter->pre = node_iter;
+
+					break;
+
+				}
+				if (CheckIsEnd(node_iter->nex,A))
+				{
+					cur_node_id[B] = node_iter->nex;
+					is_ended_B = true;
+					break;
+				}
+			}
+			if(node_iter == NULL)
+			{
+				is_ended_B = true;
+			}
+		}
+	}
+
+}
+node * LinkNode(int participate_num)
+{
+	bool is_completed = false;
+	vector<node *>head_node;
+	for( int i=1;i<=participate_num;i++)
+		head_node.push_back(cur_node_id[i]);
+
+	while(!is_completed)
+	{
+		int pair_to[participate_num+2]={0};
+		bool is_linked[participate_num+2]={0};
+		for(int i=1;i<=participate_num;i++)	//遍历所有对象查找接下来进行链接的对
+		{
+			node* tem_iter = cur_node_id[i];
+			//cout<<"par: "<<i<<endl;
+			if(tem_iter == NULL)continue;
+			for(;tem_iter!=NULL;tem_iter = tem_iter->nex)
+			{
+				if(tem_iter->contain("send(")||tem_iter->contain("recv("))
+				{	
+					pair_to[i] = GetDestination(tem_iter);
+					//cout<<tem_iter->tex<<"  dest: "<<pair_to[i]<<endl;
+					break;
+				}
+			}
+			//cout<<i<<" "<<pair_to[i]<<endl;
+			if(pair_to[pair_to[i]]==i&&is_linked[pair_to[i]]==false)	//配对成功
+			{
+				LinkPair(i,pair_to[i]);	
+				is_linked[i] = true;
+				is_linked[pair_to[i]] = true;
+			}
+		}
+		is_completed = true;
+		for(int i=1;i<=participate_num;i++)	//遍历所有对象看是否已经到达末尾
+		{
+			is_completed = (is_completed&&(cur_node_id[i]==NULL));
+		}
+	}
+	for( int i=1;i<=participate_num;i++)
+		if(head_node[i-1]->pre==NULL)
+			return head_node[i-1];
+
+}
+
